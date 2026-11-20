@@ -17,6 +17,9 @@ button{flex:1 1 30%;padding:12px 6px;border:0;border-radius:10px;background:var(
 button.on{background:var(--acc);color:#000}
 #gyro{flex:1 1 60%;background:#2b4a7a}
 .info{margin-top:12px;font:12px monospace;color:var(--mute);white-space:pre-wrap}
+button.sw{flex:0 0 36px;height:36px;padding:0;border-radius:50%;border:2px solid #333842}
+button.sw.on{outline:3px solid var(--fg);outline-offset:2px}
+.cn{margin-top:6px;font-size:13px;color:var(--mute)}
 label{display:flex;gap:8px;align-items:center;margin-top:10px;color:var(--mute);font-size:13px}
 </style>
 </head>
@@ -24,6 +27,7 @@ label{display:flex;gap:8px;align-items:center;margin-top:10px;color:var(--mute);
 <h1>Göz Animasyon Testi · 128×68</h1>
 <div class="dev"><canvas id="c" width="128" height="68"></canvas></div>
 <div class="row"><button id="gyro">Gyro'yu Etkinleştir</button><button id="center" style="flex:0 0 30%">Ortala</button></div>
+<div class="row" id="colors"></div><div class="cn">OLED rengi: <b id="colname"></b></div>
 <div class="row" id="moods"></div>
 <label><input type="checkbox" id="auto" checked> Hareketle otomatik ifade (hafif vuruş → şaşkın, sallama → kızgın, hızlı döndürme → sersem, ekranı yere çevirme → bayılma, 15 sn hareketsiz → uyku)</label>
 <div class="info" id="info">Gyro kapalı — ekranı sürükleyerek eğimi simüle edebilirsin.</div>
@@ -33,9 +37,24 @@ const c=document.getElementById('c'),out=c.getContext('2d');
 const W=128,H=68;
 const o=document.createElement('canvas');o.width=W;o.height=H;const x=o.getContext('2d');
 const img=out.createImageData(W,H);
-function present(){const d=x.getImageData(0,0,W,H).data,q=img.data;
- for(let i=0;i<d.length;i+=4){const on=d[i]>110;q[i]=on?0xdf:0;q[i+1]=on?0xf0:0;q[i+2]=on?0xff:0;q[i+3]=255}
+// piyasadaki tek renkli OLED panel renkleri
+const COLORS={
+ 'Beyaz':['#eef4ff'],'Mavi':['#38a8ff'],'Sarı':['#ffd83a'],'Yeşil':['#3dff86'],
+ 'Turuncu':['#ffa21f'],'Kırmızı':['#ff3d3d'],'Mor':['#b46bff'],'Turkuaz':['#2ff0e6'],
+ 'Sarı+Mavi (çift)':['#ffd83a','#38a8ff'],
+};
+const hex=h=>[1,3,5].map(i=>parseInt(h.slice(i,i+2),16));
+let colName='Beyaz';try{const v=localStorage.getItem('oledColor');if(COLORS[v])colName=v}catch(e){}
+function present(){const d=x.getImageData(0,0,W,H).data,q=img.data,cs=COLORS[colName].map(hex);
+ for(let i=0;i<d.length;i+=4){const row=(i>>2)/W|0;const col=cs.length>1&&row>=16?cs[1]:cs[0];
+  const on=d[i]>110;q[i]=on?col[0]:0;q[i+1]=on?col[1]:0;q[i+2]=on?col[2]:0;q[i+3]=255}
  out.putImageData(img,0,0)}
+{const row=document.getElementById('colors');for(const k in COLORS){const b=document.createElement('button');
+ b.className='sw';b.title=k;const cs=COLORS[k];
+ b.style.background=cs.length>1?`linear-gradient(${cs[0]} 0 24%,${cs[1]} 24%)`:cs[0];
+ b.onclick=()=>{colName=k;try{localStorage.setItem('oledColor',k)}catch(e){};mark()};row.appendChild(b)}
+ function mark(){[...row.children].forEach(b=>b.classList.toggle('on',b.title===colName));document.getElementById('colname').textContent=colName}
+ mark()}
 const PI=Math.PI,clamp=(v,a,b)=>Math.max(a,Math.min(b,v)),rnd=(a,b)=>a+Math.random()*(b-a);
 
 // ================= İFADELER (kaomoji / piksel tarzı) =================
@@ -102,9 +121,9 @@ function frame(now){
  const dt=Math.min(50,now-last)/16.67;last=now;
  if(moodUntil&&now>moodUntil){moodUntil=0;setMood(manual)}
  if(auto()){
-  if(faceDown){if(target()!=='faint')setMood('faint');moodUntil=now+800;lastActive=now}
+  if(faceDown){if(target()!=='faint')setMood('faint');moodUntil=now+4000;lastActive=now}
   else if(!idle&&now-lastActive>15000&&target()!=='sleep'){idle=true;setMood('sleep');moodUntil=0}
-  if(tapAt&&now-tapAt>280){if(shakePeaks.length<2)trigger('surprise',1300);tapAt=0}
+  if(tapAt&&now-tapAt>280){if(shakePeaks.length<2)trigger('surprise',3500);tapAt=0}
  }
  const asleep=mood==='sleep';
  // --- kendiliğinden bakış (telefon sabitken) ---
@@ -152,7 +171,7 @@ requestAnimationFrame(frame);
 const info=document.getElementById('info');
 let nOri=0,nMot=0,base=null,rawG=0,rawB=0,faceDown=false,downSince=0;
 let grav={x:0,y:0,z:9.8},shakePeaks=[],lastPeakSign=0,spinMs=0,lastMot=0,rotMag=0,linMag=0;
-function wake(now){lastActive=now;if(idle){idle=false;trigger('surprise',900)}}
+function wake(now){lastActive=now;if(idle){idle=false;trigger('surprise',3000)}}
 function applyTilt(g,bt){
  rawG=g;rawB=bt;if(!base)base={g,b:bt};
  let nx=clamp((g-base.g)/28,-1,1),ny=clamp((bt-base.b)/28,-1,1);
@@ -177,12 +196,12 @@ function onMot(e){
  if(grav.z<-7){if(!downSince)downSince=now;faceDown=now-downSince>600}else{downSince=0;faceDown=false}
  // döndürme: 350 ms boyunca hızlı dönüş
  spinMs=rotMag>220?spinMs+dtm:Math.max(0,spinMs-dtm*2);
- if(spinMs>350){trigger('dizzy',3000);spinMs=0}
+ if(spinMs>350){trigger('dizzy',6000);spinMs=0}
  // sallama: 1 sn içinde yön değiştiren 4+ güçlü tepe
  const ax=Math.abs(la.x)>Math.abs(la.y)?la.x:la.y;
  shakePeaks=shakePeaks.filter(t=>now-t<1000);
  if(Math.abs(ax)>9&&Math.sign(ax)!==lastPeakSign){lastPeakSign=Math.sign(ax);shakePeaks.push(now)}
- if(shakePeaks.length>=4){trigger('angry',2500);shakePeaks=[];tapAt=0}
+ if(shakePeaks.length>=4){trigger('angry',5000);shakePeaks=[];tapAt=0}
  // vuruş: kısa ani darbe, ardından sallama yok
  if(linMag>7&&!tapAt&&rotMag<150&&shakePeaks.length<=1)tapAt=now;
  // darbe gözleri hafifçe sarsar
