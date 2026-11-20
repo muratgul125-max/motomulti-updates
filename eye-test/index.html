@@ -29,7 +29,8 @@ label{display:flex;gap:8px;align-items:center;margin-top:10px;color:var(--mute);
 <div class="row"><button id="gyro">Gyro'yu Etkinleştir</button><button id="center" style="flex:0 0 30%">Ortala</button></div>
 <div class="row" id="colors"></div><div class="cn">OLED rengi: <b id="colname"></b></div>
 <div class="row" id="moods"></div>
-<label><input type="checkbox" id="auto" checked> Hareketle otomatik ifade (hafif vuruş → şaşkın, sallama → kızgın, hızlı döndürme → sersem, ekranı yere çevirme → bayılma, 15 sn hareketsiz → uyku)</label>
+<input type="checkbox" id="auto" checked hidden>
+<div class="cn">Cihaz ruh halini kendisi seçer. Taşınmak/hafif sallanmak keyif ve enerji verir; sert sallama kızdırır (sonra küser), döndürme başını döndürür, vuruş şaşırtır, ters çevirmek bayıltır, ~2 dk hareketsiz kalınca uyuklar ve uyur. Butonlar sadece 6 sn'lik test içindir.</div>
 <div class="info" id="info">Gyro kapalı — ekranı sürükleyerek eğimi simüle edebilirsin.</div>
 <script>
 // ================= EKRAN =================
@@ -95,17 +96,60 @@ let mood='normal',pending=null,manual='normal',moodUntil=0,pop=0;
 const auto=()=>document.getElementById('auto').checked;
 const mb=document.getElementById('moods');
 for(const k in MOODS){const b=document.createElement('button');b.textContent=MOODS[k];b.dataset.k=k;
- b.onclick=()=>{manual=k;moodUntil=0;setMood(k)};mb.appendChild(b)}
+ b.onclick=()=>{forced=k;forcedUntil=performance.now()+6000;moodUntil=0;setMood(k)};mb.appendChild(b)}
 const target=()=>pending||mood;
 function sync(){const t=target();[...mb.children].forEach(b=>b.classList.toggle('on',b.dataset.k===t))}
 function setMood(m){if(m===target())return;pending=m;startBlink(performance.now(),false);sync()}
-function trigger(m,ms){if(!auto())return;if(target()!==m)setMood(m);moodUntil=performance.now()+ms}
+// manuel buton = 6 sn test, sonra cihaz kendi karar verir
+let forced=null,forcedUntil=0;
+function trigger(m,ms){if(target()!==m)setMood(m);moodUntil=performance.now()+ms}
+// ===== DUYGU MOTORU: cihaz kendi ruh halini sensörlere göre yaşar =====
+const brain={energy:0.8,joy:0.5,anger:0,dizzy:0,hold:0,next:0,spont:performance.now()+rnd(15000,30000),lastMood:'normal',
+ sulkUntil:0,
+ // yumuşak hareket (taşınma, sallanma) = keyif ve enerji
+ feed(lin,rot,dts){const g=Math.min(1,Math.max(0,(lin-0.4)/3))+Math.min(1,rot/120)*0.5;
+  this.energy=Math.min(1,this.energy+g*0.12*dts);if(lin<5)this.joy=Math.min(1,this.joy+g*0.05*dts)},
+ shaken(){this.anger=Math.min(1,this.anger+0.5);this.joy=Math.max(0,this.joy-0.25);this.energy=1},
+ spun(){this.dizzy=Math.min(1,this.dizzy+0.7);this.energy=1},
+ tapped(){this.energy=Math.min(1,this.energy+0.35);this.joy=Math.min(1,this.joy+0.08)},
+};
+function brainStep(now,dts){
+ const b=brain;
+ b.energy=Math.max(0,b.energy-0.006*dts);                 // ~2 dk hareketsizlikte uykuya
+ b.anger=Math.max(0,b.anger-0.06*dts);
+ b.dizzy=Math.max(0,b.dizzy-0.1*dts);
+ b.joy+=(0.45-b.joy)*0.01*dts;
+ if(forced&&now<forcedUntil){if(target()!==forced)setMood(forced);return}
+ forced=null;
+ if(moodUntil&&now<moodUntil)return;                       // kısa tepki (şaşkınlık) sürüyor
+ moodUntil=0;
+ if(now<b.next)return;b.next=now+400;
+ let want;
+ if(faceDown)want='faint';
+ else if(b.dizzy>0.35)want='dizzy';
+ else if(b.anger>0.45){want='angry';b.sulkUntil=now+rnd(4000,7000)}
+ else if(now<b.sulkUntil)want='sad';                       // kızgınlıktan sonra küsme
+ else if(b.energy<0.12||(mood==='sleep'&&b.energy<0.3))want='sleep';
+ else if(b.joy>0.9)want='love';
+ else if(b.joy>0.7)want='happy';
+ else want='normal';
+ // kendiliğinden küçük anlar
+ if(want==='normal'&&now>b.spont){
+  const r=Math.random();
+  if(r<0.45){trigger('happy',rnd(2500,4500))}
+  else if(r<0.65&&b.joy>0.4){trigger('wink',1400)}
+  else if(r<0.8&&b.energy<0.45){trigger('sleep',rnd(1500,2500))}   // uyuklama
+  b.spont=now+rnd(14000,32000);return}
+ if(want!==target()&&(now>b.hold||want==='faint'||want==='angry'||want==='dizzy')){
+  if(mood==='sleep'&&want!=='sleep'&&want!=='faint'){trigger('surprise',1800);b.hold=now+1800;return} // uyanma
+  setMood(want);b.hold=now+3000}
+}
 sync();
 
 // bakış: yay (spring) fiziği -> hafif gecikme ve doğal oturma
 const gaze={x:0,y:0,vx:0,vy:0};
 let tiltX=0,tiltY=0,moving=0;            // sensörden gelen, filtrelenmiş eğim
-let sacX=0,sacY=0,sacUntil=0,nextSac=performance.now()+1500;
+let sacX=0,sacY=0,sacUntil=0,nextSac=performance.now()+1500,scan=null;
 let drift={x:0,y:0};
 // göz kırpma
 let blinkT=-1e9,dbl=false,nextBlink=performance.now()+2500;
@@ -119,24 +163,28 @@ function blinkAmt(now){const t=now-blinkT;let b=0;
 let last=performance.now(),lastActive=performance.now(),idle=false,tapAt=0;
 function frame(now){
  const dt=Math.min(50,now-last)/16.67;last=now;
- if(moodUntil&&now>moodUntil){moodUntil=0;setMood(manual)}
- if(auto()){
-  if(faceDown){if(target()!=='faint')setMood('faint');moodUntil=now+4000;lastActive=now}
-  else if(!idle&&now-lastActive>15000&&target()!=='sleep'){idle=true;setMood('sleep');moodUntil=0}
-  if(tapAt&&now-tapAt>280){if(shakePeaks.length<2)trigger('surprise',3500);tapAt=0}
- }
+ if(tapAt&&now-tapAt>280){if(shakePeaks.length<2){brain.tapped();trigger('surprise',rnd(2200,3200))}tapAt=0}
+ brainStep(now,dt/60);
+ const drowsy=mood==='normal'&&brain.energy<0.35;
  const asleep=mood==='sleep';
  // --- kendiliğinden bakış (telefon sabitken) ---
  moving*=Math.pow(0.9,dt);
- if(now>nextSac&&!asleep){
-  if(moving<0.15){
-   const r=Math.random();
-   if(r<0.35){sacX=0;sacY=0}                                   // merkeze dön
-   else if(r<0.85){sacX=rnd(-0.75,0.75);sacY=rnd(-0.45,0.35)}  // etrafa bak
-   else{sacX=rnd(-0.5,0.5);sacY=-0.6}                          // yukarı, düşünür gibi
-   if(Math.hypot(sacX-gaze.x,sacY-gaze.y)>0.6&&Math.random()<0.5)startBlink(now,false); // büyük bakışta kırp
-  }else{sacX=0;sacY=0}
-  nextSac=now+rnd(900,3200)}
+ if(scan){ // yavaş tarama: bir yandan öbür yana süzülerek bak
+  const u=Math.min(1,(now-scan.t0)/scan.dur),e=u*u*(3-2*u);
+  sacX=scan.x0+(scan.x1-scan.x0)*e;sacY=scan.y;
+  if(u>=1){scan=null;nextSac=now+rnd(600,1600)}}
+ else if(now>nextSac&&!asleep){
+  const calm=moving<0.15,slow=drowsy?2:1;
+  const r=Math.random();
+  if(!calm){sacX=sacX*0.3;sacY=0;nextSac=now+rnd(500,1200)}
+  else if(r<0.25){sacX=0;sacY=0;nextSac=now+rnd(1500,3500)*slow}            // öne bak, dinlen
+  else if(r<0.55){const d=Math.random()<0.5?-1:1;                              // etrafı tara
+   scan={x0:sacX,x1:d*rnd(0.6,0.9),y:rnd(-0.2,0.15),t0:now,dur:rnd(1400,2600)*slow}}
+  else if(r<0.85){sacX=rnd(-0.85,0.85);sacY=rnd(-0.4,0.3);nextSac=now+rnd(700,2200)*slow} // hızlı bakış
+  else if(r<0.93){sacX=rnd(-0.4,0.4);sacY=-0.65;nextSac=now+rnd(1200,2200)}   // yukarı, düşünür gibi
+  else{sacX=rnd(-0.3,0.3);sacY=0.55;nextSac=now+rnd(900,1600)}               // aşağı göz atma
+  if(!scan&&Math.hypot(sacX-gaze.x,sacY-gaze.y)>0.7&&Math.random()<0.5)startBlink(now,false);
+ }
  // mikro titreşim (fiksasyon kayması)
  drift.x+=(rnd(-1,1)*0.02-drift.x*0.05)*dt;drift.y+=(rnd(-1,1)*0.02-drift.y*0.05)*dt;
  const gx=asleep?0:clamp(tiltX+sacX*(1-Math.min(1,Math.abs(tiltX)*1.5))+drift.x,-1,1);
@@ -149,7 +197,7 @@ function frame(now){
  const b=blinkAmt(now);
  if(pending&&now-blinkT>=75){mood=pending;pending=null;pop=1;sync()}
  pop*=Math.pow(0.85,dt);
- const open=NOBLINK[mood]&&!pending?1:1-b;
+ const open=(NOBLINK[mood]&&!pending?1:1-b)*(drowsy?0.55+0.2*(brain.energy/0.35):1);
  // --- çiz ---
  x.setTransform(1,0,0,1,0,0);x.fillStyle='#000';x.fillRect(0,0,W,H);x.fillStyle='#fff';x.strokeStyle='#fff';
  const breathe=Math.sin(now/(asleep?1500:1000))*(asleep?1.4:0.5);
@@ -171,7 +219,7 @@ requestAnimationFrame(frame);
 const info=document.getElementById('info');
 let nOri=0,nMot=0,base=null,rawG=0,rawB=0,faceDown=false,downSince=0;
 let grav={x:0,y:0,z:9.8},shakePeaks=[],lastPeakSign=0,spinMs=0,lastMot=0,rotMag=0,linMag=0;
-function wake(now){lastActive=now;if(idle){idle=false;trigger('surprise',3000)}}
+function wake(now){lastActive=now}
 function applyTilt(g,bt){
  rawG=g;rawB=bt;if(!base)base={g,b:bt};
  let nx=clamp((g-base.g)/28,-1,1),ny=clamp((bt-base.b)/28,-1,1);
@@ -192,21 +240,22 @@ function onMot(e){
  const r=e.rotationRate;rotMag=r?Math.hypot(r.alpha||0,r.beta||0,r.gamma||0):0;
  if(!nOri||!base&&nOri===0){const g=Math.atan2(-grav.x,Math.hypot(grav.y,grav.z))*180/PI,bt=Math.atan2(grav.y,grav.z)*180/PI;if(!nOri)applyTilt(g,bt)}
  if(linMag>1.2||rotMag>45)wake(now);
+ brain.feed(linMag,rotMag,dtm/1000);
  // ters çevirme: ekran 0,6 sn boyunca aşağı bakıyor
  if(grav.z<-7){if(!downSince)downSince=now;faceDown=now-downSince>600}else{downSince=0;faceDown=false}
  // döndürme: 350 ms boyunca hızlı dönüş
  spinMs=rotMag>220?spinMs+dtm:Math.max(0,spinMs-dtm*2);
- if(spinMs>350){trigger('dizzy',6000);spinMs=0}
+ if(spinMs>350){brain.spun();spinMs=0}
  // sallama: 1 sn içinde yön değiştiren 4+ güçlü tepe
  const ax=Math.abs(la.x)>Math.abs(la.y)?la.x:la.y;
  shakePeaks=shakePeaks.filter(t=>now-t<1000);
  if(Math.abs(ax)>9&&Math.sign(ax)!==lastPeakSign){lastPeakSign=Math.sign(ax);shakePeaks.push(now)}
- if(shakePeaks.length>=4){trigger('angry',5000);shakePeaks=[];tapAt=0}
+ if(shakePeaks.length>=4){brain.shaken();shakePeaks=[];tapAt=0}
  // vuruş: kısa ani darbe, ardından sallama yok
  if(linMag>7&&!tapAt&&rotMag<150&&shakePeaks.length<=1)tapAt=now;
  // darbe gözleri hafifçe sarsar
  if(linMag>4){gaze.vx-=la.x*0.006;gaze.vy+=la.y*0.006}
- info.textContent=`olay: yön ${nOri} / hareket ${nMot}\neğim x ${tiltX.toFixed(2)}  y ${tiltY.toFixed(2)}\nivme ${linMag.toFixed(1)} m/s²  dönüş ${rotMag.toFixed(0)}°/s  sallama ${shakePeaks.length}\nmod: ${mood}${faceDown?'  (ters)':''}`;
+ info.textContent=`olay: yön ${nOri} / hareket ${nMot}\neğim x ${tiltX.toFixed(2)}  y ${tiltY.toFixed(2)}\nivme ${linMag.toFixed(1)} m/s²  dönüş ${rotMag.toFixed(0)}°/s  sallama ${shakePeaks.length}\nmod: ${mood}  enerji ${brain.energy.toFixed(2)} keyif ${brain.joy.toFixed(2)} öfke ${brain.anger.toFixed(2)} baş dönmesi ${brain.dizzy.toFixed(2)}${faceDown?'  (ters)':''}`;
 }
 document.getElementById('gyro').onclick=async function(){
  try{
