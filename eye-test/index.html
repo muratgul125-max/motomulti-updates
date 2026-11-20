@@ -67,7 +67,7 @@ const EYE={
  normal:(s,t,px,py)=>{dot(6,8)},
  happy:()=>{x.lineWidth=3.5;x.lineCap='round';x.beginPath();x.arc(0,5,9,PI*1.15,PI*1.85);x.stroke()},
  wink:(s,t,px,py)=>{if(s<0){dot(6,8)}else line([[7,-7],[-6,0],[7,7]],3.5)},
- sad:(s,t,px,py)=>{dot(6,7);line([[-s*8,-14],[s*8,-10]],2.2)},
+ sad:(s,t,px,py)=>{dot(6,7);x.fillStyle='#000';x.beginPath();x.moveTo(s*12,-12);x.lineTo(s*12,0);x.lineTo(-s*12,-9);x.lineTo(-s*12,-12);x.fill();x.fillStyle='#fff'},
  angry:(s)=>{dot(9,8);x.fillStyle='#000';x.beginPath();x.moveTo(-s*14,-14);x.lineTo(-s*14,2);x.lineTo(s*14,-9);x.lineTo(s*14,-14);x.fill();x.fillStyle='#fff'},
  surprise:(s,t,px,py)=>{dot(8,11)},
  sleep:()=>{x.lineWidth=3;x.lineCap='round';x.beginPath();x.arc(0,-5,8,PI*0.15,PI*0.85);x.stroke()},
@@ -201,14 +201,14 @@ function frame(now){
  // --- çiz ---
  x.setTransform(1,0,0,1,0,0);x.fillStyle='#000';x.fillRect(0,0,W,H);x.fillStyle='#fff';x.strokeStyle='#fff';
  const breathe=Math.sin(now/(asleep?1500:1000))*(asleep?1.4:0.5);
- const ox=gaze.x*9,oy=gaze.y*5+breathe,sc=1+pop*0.12;
+ const ox=gaze.x*7,oy=gaze.y*4+breathe,sc=1+pop*0.12;
  for(const s of[-1,1]){
   const persp=1+gaze.x*s*0.08;
-  x.save();x.translate(64+s*28+ox,27+oy);x.scale(1.4*sc*persp,1.4*sc*persp*Math.max(0.1,open));
+  x.save();x.translate(64+s*29+ox,25+oy);x.scale(1.9*sc*persp,1.9*sc*persp*Math.max(0.1,open));
   EYE[mood](s,now,gaze.x*1.2,gaze.y*1.2);x.restore();
  }
- if(BLUSH[mood]){blush(64-40+ox,45+oy);blush(64+40+ox,45+oy)}
- x.save();x.translate(64+ox*0.75,52+oy*0.85);x.scale(sc,sc);MOUTH[mood](now);x.restore();
+ if(BLUSH[mood]){blush(64-44+ox,47+oy);blush(64+44+ox,47+oy)}
+ x.save();x.translate(64+ox*0.75,54+oy*0.85);x.scale(sc,sc);MOUTH[mood](now);x.restore();
  if(asleep){const t=(now/1800)%1;x.font='bold 8px monospace';x.fillText('z',94,20-t*5);if(t>0.35)x.fillText('Z',101,12-t*5)}
  present();
  requestAnimationFrame(frame);
