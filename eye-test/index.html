@@ -104,15 +104,26 @@ requestAnimationFrame(draw);
 
 function trigger(m,ms){if(!document.getElementById('auto').checked||moodUntil&&mood===m)return;mood=m;moodUntil=performance.now()+ms;sync()}
 const info=document.getElementById('info');
-function onOri(e){
- const g=e.gamma||0,bt=e.beta||0;               // sol/sağ, ileri/geri
+let nOri=0,nMot=0,oriOk=false;
+function setTilt(g,bt){
  tx=Math.max(-1,Math.min(1,g/35));
  ty=Math.max(-1,Math.min(1,(bt-40)/35));
  faceDown=Math.abs(bt)>150;
- info.textContent=`alpha ${(e.alpha||0).toFixed(0)}°  beta ${bt.toFixed(0)}°  gamma ${g.toFixed(0)}°\nsarsıntı ${shake.toFixed(1)}  mod: ${mood}`;
+}
+function onOri(e){
+ nOri++;if(e.beta==null&&e.gamma==null)return;oriOk=true;
+ const g=e.gamma||0,bt=e.beta||0;               // sol/sağ, ileri/geri
+ setTilt(g,bt);
+ info.textContent=`olay: yön ${nOri} / hareket ${nMot}\nalpha ${(e.alpha||0).toFixed(0)}°  beta ${bt.toFixed(0)}°  gamma ${g.toFixed(0)}°\nsarsıntı ${shake.toFixed(1)}  mod: ${mood}`;
 }
 function onMot(e){
- const a=e.accelerationIncludingGravity;if(!a)return;
+ nMot++;const a=e.accelerationIncludingGravity;if(!a||a.x==null)return;
+ if(!oriOk){ // yön sensörü veri vermiyorsa yerçekiminden eğimi hesapla
+  const g=Math.atan2(-a.x,Math.hypot(a.y,a.z))*180/Math.PI;
+  const bt=Math.atan2(a.y,a.z)*180/Math.PI;
+  setTilt(g,bt);
+  info.textContent=`olay: yön ${nOri} / hareket ${nMot} (ivmeölçer modu)\nbeta ${bt.toFixed(0)}°  gamma ${g.toFixed(0)}°\nsarsıntı ${shake.toFixed(1)}  mod: ${mood}`;
+ }
  if(lastAcc){const d=Math.abs(a.x-lastAcc.x)+Math.abs(a.y-lastAcc.y)+Math.abs(a.z-lastAcc.z);
   shake=shake*0.9+d*0.1;
   if(shake>6)trigger('dizzy',2500);else if(d>18)trigger('surprise',1200);}
@@ -126,6 +137,8 @@ document.getElementById('gyro').onclick=async function(){
   }
   addEventListener('deviceorientation',onOri);addEventListener('devicemotion',onMot);
   this.textContent='Gyro aktif ✓';this.classList.add('on');
+  if(!window.isSecureContext)info.textContent='Uyarı: sayfa HTTPS değil, sensörler kapalı olabilir.';
+  setTimeout(()=>{if(!nOri&&!nMot)info.textContent='Sensör verisi gelmiyor. Chrome: adres çubuğundaki kilit/ayar simgesi → Site ayarları → Hareket sensörleri → İzin ver, sonra sayfayı yenile.'},2000);
  }catch(err){info.textContent='Gyro açılamadı: '+err+' (HTTPS gerekli)'}
 };
 // sürükleyerek simülasyon
