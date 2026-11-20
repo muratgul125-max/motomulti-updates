@@ -15,7 +15,7 @@ canvas{width:100%;aspect-ratio:128/68;background:#000;border-radius:8px;image-re
 .row{display:flex;flex-wrap:wrap;gap:8px;margin-top:14px}
 button{flex:1 1 30%;padding:12px 6px;border:0;border-radius:10px;background:var(--panel);color:var(--fg);font-size:14px}
 button.on{background:var(--acc);color:#000}
-#gyro{flex-basis:100%;background:#2b4a7a}
+#gyro{flex:1 1 60%;background:#2b4a7a}
 .info{margin-top:12px;font:12px monospace;color:var(--mute);white-space:pre-wrap}
 label{display:flex;gap:8px;align-items:center;margin-top:10px;color:var(--mute);font-size:13px}
 </style>
@@ -23,176 +23,171 @@ label{display:flex;gap:8px;align-items:center;margin-top:10px;color:var(--mute);
 <body>
 <h1>Göz Animasyon Testi · 128×68</h1>
 <div class="dev"><canvas id="c" width="128" height="68"></canvas></div>
-<div class="row"><button id="gyro">Gyro'yu Etkinleştir</button></div>
+<div class="row"><button id="gyro">Gyro'yu Etkinleştir</button><button id="center" style="flex:0 0 30%">Ortala</button></div>
 <div class="row" id="moods"></div>
-<label><input type="checkbox" id="auto" checked> Hareketle otomatik ifade (vuruş → şaşkın, sallama → kızgın, döndürme → sersem, ters çevirme → bayılma, 15 sn hareketsiz → uyku)</label>
+<label><input type="checkbox" id="auto" checked> Hareketle otomatik ifade (hafif vuruş → şaşkın, sallama → kızgın, hızlı döndürme → sersem, ekranı yere çevirme → bayılma, 15 sn hareketsiz → uyku)</label>
 <div class="info" id="info">Gyro kapalı — ekranı sürükleyerek eğimi simüle edebilirsin.</div>
 <script>
+// ================= EKRAN =================
 const c=document.getElementById('c'),out=c.getContext('2d');
 const W=128,H=68;
 const o=document.createElement('canvas');o.width=W;o.height=H;const x=o.getContext('2d');
-const MOODS={normal:'Normal',happy:'Mutlu',wink:'Göz kırp',sad:'Üzgün',angry:'Kızgın',surprise:'Şaşkın',sleep:'Uyku',love:'Aşık',dizzy:'Sersem',faint:'Bayıldı'};
-// göz parametreleri: w,h genişlik/yükseklik, r köşe, ang kaş eğimi (+kızgın, -üzgün), hb mutlu yanak kesimi, wk göz kırpma
-const P={
- normal:  {w:22,h:26,r:8, ang:0,    hb:0,  wk:0,m:'smile'},
- happy:   {w:24,h:24,r:10,ang:0,    hb:1,  wk:0,m:'grin',blush:1},
- wink:    {w:22,h:26,r:8, ang:0,    hb:0,  wk:1,m:'grin',blush:1},
- sad:     {w:22,h:22,r:8, ang:-0.6,hb:0,  wk:0,m:'frown'},
- angry:   {w:24,h:22,r:6, ang:0.6, hb:0,  wk:0,m:'flat'},
- surprise:{w:24,h:30,r:12,ang:0,    hb:0,  wk:0,m:'o'},
- sleep:   {w:24,h:3, r:1, ang:0,    hb:0,  wk:0,m:'flat',zz:1},
- love:    {w:22,h:26,r:8, ang:0,    hb:0,  wk:0,m:'grin',ov:'heart',blush:1},
- dizzy:   {w:22,h:26,r:8, ang:0,    hb:0,  wk:0,m:'wave',ov:'spiral'},
- faint:   {w:22,h:26,r:8, ang:0,    hb:0,  wk:0,m:'wave',ov:'x'},
-};
-const KEYS=['w','h','r','ang','hb','wk'];
-let mood='normal',pending=null,manual='normal',moodUntil=0;
-let cur={...P.normal};
-let tx=0,ty=0,lx=0,ly=0,gx=0,gy=0,gazeUntil=0;
-let blinkT=-1e9,nextBlink=performance.now()+1500,dbl=false,squint=1,squintUntil=0,nextIdle=performance.now()+2500;
-let lastActive=performance.now(),idle=false,rot=0,shake=0,lastAcc=null,faceDown=false;
-const auto=()=>document.getElementById('auto').checked;
-
-const mb=document.getElementById('moods');
-for(const k in MOODS){const b=document.createElement('button');b.textContent=MOODS[k];b.dataset.k=k;
- b.onclick=()=>{manual=k;moodUntil=0;setMood(k)};mb.appendChild(b)}
-function sync(){const t=target();[...mb.children].forEach(b=>b.classList.toggle('on',b.dataset.k===t))}
-function target(){return pending||mood}
-function setMood(m){if(m===target())return;pending=m;blinkT=performance.now();dbl=false;sync()}
-function trigger(m,ms){if(!auto()||faceDown)return;if(target()!==m)setMood(m);moodUntil=performance.now()+ms}
-sync();
-
-// ---- çizim ----
-function rr(cx,cy,w,h,r){r=Math.max(0,Math.min(r,w/2,h/2));x.beginPath();x.roundRect(cx-w/2,cy-h/2,w,h,r);x.fill()}
-function eye(cx,cy,side,blink,now){
- const p=cur,ov=P[mood].ov;
- if(ov&&blink<0.5){ // özel gözler
-  x.save();x.translate(cx,cy);
-  if(ov==='heart'){const s=1+Math.sin(now/180)*0.08;x.scale(s,s);x.beginPath();
-   x.moveTo(0,10);x.bezierCurveTo(-16,-1,-9,-14,0,-5);x.bezierCurveTo(9,-14,16,-1,0,10);x.fill()}
-  else if(ov==='spiral'){x.lineWidth=2.2;x.beginPath();const a0=now/140*side;
-   for(let t=0;t<16;t+=0.2){const r=t*0.75;x.lineTo(Math.cos(t+a0)*r,Math.sin(t+a0)*r)}x.stroke()}
-  else{x.lineWidth=3.5;x.lineCap='round';x.beginPath();x.moveTo(-8,-8);x.lineTo(8,8);x.moveTo(8,-8);x.lineTo(-8,8);x.stroke()}
-  x.restore();return}
- // perspektif: bakılan taraftaki göz biraz büyür
- const persp=1+lx*side*0.1;
- let w=p.w*persp,h=p.h*persp*squint;
- if(side>0&&p.wk>0.5){ // göz kırpma: "<" şekli
-  x.lineWidth=3.5;x.lineCap='round';x.lineJoin='round';x.beginPath();
-  x.moveTo(cx+8,cy-7);x.lineTo(cx-6,cy);x.lineTo(cx+8,cy+7);x.stroke();return}
- const open=1-blink;
- const hh=Math.max(2.5,h*open);
- const ey=cy+(h-hh)*0.3; // üst kapak daha çok iner
- rr(cx,ey,w,hh,Math.min(p.r,hh/2));
- x.fillStyle='#000';
- if(Math.abs(p.ang)>0.02){ // kaş/kapak eğimi
-  const inner=-side, d=p.ang*h, top=ey-hh/2-1;
-  const yIn=top+Math.max(0,d)+ (d<0?0:0), yOut=top+Math.max(0,-d);
-  x.beginPath();
-  const xi=cx+inner*w/2, xo=cx-inner*w/2;
-  x.moveTo(xi-inner*2,top-30);x.lineTo(xi+inner*2,top-30);
-  x.lineTo(xi+inner*2,yIn+(d>0?d*0.15:0));x.lineTo(xo-inner*2,yOut);x.lineTo(xo-inner*2,top-30);x.fill();
- }
- if(p.hb>0.02){ // mutlu: alttan yuvarlak kesim => ^ ^
-  x.beginPath();x.ellipse(cx,ey+hh*0.62+(1-p.hb)*h,w*0.6,hh*0.72,0,0,Math.PI*2);x.fill()}
- x.fillStyle='#fff';
-}
-function blushAt(cx,cy){x.lineWidth=1.5;x.lineCap='round';x.beginPath();
- for(let i=0;i<3;i++){x.moveTo(cx+i*4-4,cy+2);x.lineTo(cx+i*4-2,cy-1)}x.stroke()}
-function mouth(cx,cy,now){
- x.lineWidth=2;x.lineCap='round';x.beginPath();
- switch(P[mood].m){
-  case 'smile':x.arc(cx,cy-5,7,0.25*Math.PI,0.75*Math.PI);x.stroke();break;
-  case 'grin':x.moveTo(cx-7,cy-2);x.arc(cx,cy-2,7,0,Math.PI);x.closePath();x.fill();break;
-  case 'frown':x.arc(cx,cy+5,6,1.2*Math.PI,1.8*Math.PI);x.stroke();break;
-  case 'flat':x.moveTo(cx-5,cy);x.lineTo(cx+5,cy);x.stroke();break;
-  case 'o':x.ellipse(cx,cy,3,3.5+Math.sin(now/200)*0.5,0,0,Math.PI*2);x.stroke();break;
-  case 'wave':for(let i=-6;i<=6;i++)x.lineTo(cx+i,cy+Math.sin(i*0.9+now/90)*1.4);x.stroke();break;
- }
-}
-// tek renk OLED görünümü: kenar yumuşatmayı eşikle
 const img=out.createImageData(W,H);
 function present(){const d=x.getImageData(0,0,W,H).data,q=img.data;
  for(let i=0;i<d.length;i+=4){const on=d[i]>110;q[i]=on?0xdf:0;q[i+1]=on?0xf0:0;q[i+2]=on?0xff:0;q[i+3]=255}
  out.putImageData(img,0,0)}
+const PI=Math.PI,clamp=(v,a,b)=>Math.max(a,Math.min(b,v)),rnd=(a,b)=>a+Math.random()*(b-a);
 
-let last=performance.now();
+// ================= İFADELER (kaomoji / piksel tarzı) =================
+const MOODS={normal:'Normal',happy:'Mutlu',wink:'Göz kırp',sad:'Üzgün',angry:'Kızgın',surprise:'Şaşkın',sleep:'Uyku',love:'Aşık',dizzy:'Sersem',faint:'Bayıldı'};
+function line(pts,w=3){x.lineWidth=w;x.lineCap='round';x.lineJoin='round';x.beginPath();pts.forEach(([a,b],i)=>i?x.lineTo(a,b):x.moveTo(a,b));x.stroke()}
+function dot(rx,ry){x.beginPath();x.ellipse(0,0,rx,ry,0,0,2*PI);x.fill()}
+function hole(a,b,r){x.fillStyle='#000';x.beginPath();x.arc(a,b,r,0,2*PI);x.fill();x.fillStyle='#fff'}
+const EYE={
+ normal:(s,t,px,py)=>{dot(6,8);hole(-2+px,-3+py,1.6)},
+ happy:()=>{x.lineWidth=3.5;x.lineCap='round';x.beginPath();x.arc(0,5,9,PI*1.15,PI*1.85);x.stroke()},
+ wink:(s,t,px,py)=>{if(s<0){dot(6,8);hole(-2+px,-3+py,1.6)}else line([[7,-7],[-6,0],[7,7]],3.5)},
+ sad:(s,t,px,py)=>{dot(6,7);hole(-2+px,-2+py,1.5);line([[-s*8,-16],[s*8,-11]],2.5)},
+ angry:(s)=>{dot(9,8);x.fillStyle='#000';x.beginPath();x.moveTo(-s*14,-14);x.lineTo(-s*14,2);x.lineTo(s*14,-9);x.lineTo(s*14,-14);x.fill();x.fillStyle='#fff'},
+ surprise:(s,t,px,py)=>{x.lineWidth=3;x.beginPath();x.ellipse(0,0,8,10,0,0,2*PI);x.stroke();x.beginPath();x.arc(px*1.5,py*1.5,2.6,0,2*PI);x.fill()},
+ sleep:()=>{x.lineWidth=3;x.lineCap='round';x.beginPath();x.arc(0,-5,8,PI*0.15,PI*0.85);x.stroke()},
+ love:(s,t)=>{const k=1+Math.max(0,Math.sin(t/160))**8*0.25;x.scale(k,k);x.beginPath();x.moveTo(0,8);x.bezierCurveTo(-13,-1,-7,-11,0,-4);x.bezierCurveTo(7,-11,13,-1,0,8);x.fill()},
+ dizzy:(s,t)=>{x.lineWidth=2;x.lineCap='round';x.beginPath();const a=t/120*s;for(let u=0;u<15;u+=0.2)x.lineTo(Math.cos(u+a)*u*0.65,Math.sin(u+a)*u*0.65);x.stroke()},
+ faint:()=>{line([[-6,-6],[6,6]],3.5);line([[6,-6],[-6,6]],3.5)},
+};
+const MOUTH={
+ normal:()=>{x.lineWidth=2.5;x.lineCap='round';x.beginPath();x.arc(0,-4,5,PI*0.2,PI*0.8);x.stroke()},
+ happy:()=>{x.lineWidth=2.5;x.lineCap='round';x.beginPath();x.arc(0,-5,7,PI*0.2,PI*0.8);x.stroke()},
+ wink:()=>{x.beginPath();x.moveTo(-6,-2);x.lineTo(6,-2);x.arc(0,-2,6,0,PI);x.fill()},
+ sad:()=>{x.lineWidth=2.5;x.lineCap='round';x.beginPath();x.arc(0,5,6,PI*1.2,PI*1.8);x.stroke()},
+ angry:()=>line([[-5,1],[5,1]],2.5),
+ surprise:(t)=>{x.lineWidth=2.5;x.beginPath();x.ellipse(0,0,3,3.5+Math.sin(t/150)*0.6,0,0,2*PI);x.stroke()},
+ sleep:()=>{x.lineWidth=2;x.lineCap='round';x.beginPath();x.arc(0,3,3,PI*1.15,PI*1.85);x.stroke()},
+ love:()=>{x.beginPath();x.moveTo(-6,-2);x.lineTo(6,-2);x.arc(0,-2,6,0,PI);x.fill()},
+ dizzy:(t)=>{x.lineWidth=2;x.lineCap='round';x.beginPath();for(let i=-7;i<=7;i++)x.lineTo(i,Math.sin(i*0.9+t/90)*1.5);x.stroke()},
+ faint:()=>{x.lineWidth=2;x.lineCap='round';x.beginPath();for(let i=-6;i<=6;i++)x.lineTo(i,(i&1)?1:-1);x.stroke()},
+};
+const BLUSH={happy:1,wink:1,love:1};
+const NOBLINK={sleep:1,dizzy:1,faint:1,love:1};
+function blush(cx,cy){x.lineWidth=1.6;x.lineCap='round';x.beginPath();for(let i=0;i<3;i++){x.moveTo(cx+i*4-4,cy+2);x.lineTo(cx+i*4-2,cy-1)}x.stroke()}
+
+// ================= DURUM =================
+let mood='normal',pending=null,manual='normal',moodUntil=0,pop=0;
+const auto=()=>document.getElementById('auto').checked;
+const mb=document.getElementById('moods');
+for(const k in MOODS){const b=document.createElement('button');b.textContent=MOODS[k];b.dataset.k=k;
+ b.onclick=()=>{manual=k;moodUntil=0;setMood(k)};mb.appendChild(b)}
+const target=()=>pending||mood;
+function sync(){const t=target();[...mb.children].forEach(b=>b.classList.toggle('on',b.dataset.k===t))}
+function setMood(m){if(m===target())return;pending=m;startBlink(performance.now(),false);sync()}
+function trigger(m,ms){if(!auto())return;if(target()!==m)setMood(m);moodUntil=performance.now()+ms}
+sync();
+
+// bakış: yay (spring) fiziği -> hafif gecikme ve doğal oturma
+const gaze={x:0,y:0,vx:0,vy:0};
+let tiltX=0,tiltY=0,moving=0;            // sensörden gelen, filtrelenmiş eğim
+let sacX=0,sacY=0,sacUntil=0,nextSac=performance.now()+1500;
+let drift={x:0,y:0};
+// göz kırpma
+let blinkT=-1e9,dbl=false,nextBlink=performance.now()+2500;
+function startBlink(now,double){blinkT=now;dbl=double;nextBlink=now+rnd(2500,6500)}
+function blinkAmt(now){const t=now-blinkT;let b=0;
+ if(t<60)b=t/60;else if(t<90)b=1;else if(t<200)b=1-(t-90)/110;
+ else if(dbl&&t<280)b=0;else if(dbl&&t<480){const u=t-280;b=u<55?u/55:u<80?1:Math.max(0,1-(u-80)/110)}
+ return b*b*(3-2*b)}
+
+// ================= ANA DÖNGÜ =================
+let last=performance.now(),lastActive=performance.now(),idle=false,tapAt=0;
 function frame(now){
- const dt=Math.min(50,now-last);last=now;
+ const dt=Math.min(50,now-last)/16.67;last=now;
  if(moodUntil&&now>moodUntil){moodUntil=0;setMood(manual)}
  if(auto()){
-  if(faceDown){if(target()!=='faint')setMood('faint');moodUntil=now+600}
+  if(faceDown){if(target()!=='faint')setMood('faint');moodUntil=now+800;lastActive=now}
   else if(!idle&&now-lastActive>15000&&target()!=='sleep'){idle=true;setMood('sleep');moodUntil=0}
+  if(tapAt&&now-tapAt>280){if(shakePeaks.length<2)trigger('surprise',1300);tapAt=0}
  }
- const asleep=mood==='sleep'&&!pending;
- // --- kendiliğinden davranışlar ---
- if(!asleep&&now>nextIdle){
-  const r=Math.random();
-  if(r<0.45){gx=(Math.random()*2-1)*0.8;gy=(Math.random()*2-1)*0.5;gazeUntil=now+500+Math.random()*1200}
-  else if(r<0.65){blinkT=now;dbl=true}
-  else if(r<0.8){squint=1;squintUntil=now+700}
-  else{gx=(Math.random()<0.5?-1:1)*0.6;gy=-0.6;gazeUntil=now+900} // düşünür gibi yukarı bakış
-  nextIdle=now+2000+Math.random()*4000}
- if(now>gazeUntil){gx=0;gy=0}
+ const asleep=mood==='sleep';
+ // --- kendiliğinden bakış (telefon sabitken) ---
+ moving*=Math.pow(0.9,dt);
+ if(now>nextSac&&!asleep){
+  if(moving<0.15){
+   const r=Math.random();
+   if(r<0.35){sacX=0;sacY=0}                                   // merkeze dön
+   else if(r<0.85){sacX=rnd(-0.75,0.75);sacY=rnd(-0.45,0.35)}  // etrafa bak
+   else{sacX=rnd(-0.5,0.5);sacY=-0.6}                          // yukarı, düşünür gibi
+   if(Math.hypot(sacX-gaze.x,sacY-gaze.y)>0.6&&Math.random()<0.5)startBlink(now,false); // büyük bakışta kırp
+  }else{sacX=0;sacY=0}
+  nextSac=now+rnd(900,3200)}
+ // mikro titreşim (fiksasyon kayması)
+ drift.x+=(rnd(-1,1)*0.02-drift.x*0.05)*dt;drift.y+=(rnd(-1,1)*0.02-drift.y*0.05)*dt;
+ const gx=asleep?0:clamp(tiltX+sacX*(1-Math.min(1,Math.abs(tiltX)*1.5))+drift.x,-1,1);
+ const gy=asleep?0:clamp(tiltY+sacY*(1-Math.min(1,Math.abs(tiltY)*1.5))+drift.y,-1,1);
+ const K=0.22,D=0.62;                  // yay sertliği / sönüm
+ gaze.vx=(gaze.vx+(gx-gaze.x)*K*dt)*Math.pow(D,dt);gaze.vy=(gaze.vy+(gy-gaze.y)*K*dt)*Math.pow(D,dt);
+ gaze.x+=gaze.vx*dt;gaze.y+=gaze.vy*dt;
  // --- göz kırpma ---
- if(!asleep&&now>nextBlink){blinkT=now;dbl=Math.random()<0.2;nextBlink=now+2200+Math.random()*4000}
- let bt=now-blinkT,blink=0;
- if(bt<70)blink=bt/70;else if(bt<100)blink=1;else if(bt<190)blink=1-(bt-100)/90;
- else if(dbl&&bt<260)blink=0;else if(dbl&&bt<450){const b2=bt-260;blink=b2<60?b2/60:b2<85?1:Math.max(0,1-(b2-85)/90)}
- blink=blink*blink*(3-2*blink);
- if(pending&&bt>=85){mood=pending;pending=null;sync()}
- // --- parametreleri hedefe yumuşakça taşı ---
- const T=P[mood],k=1-Math.pow(0.82,dt/16);
- for(const key of KEYS)cur[key]+=(T[key]-cur[key])*k;
- squint+=((now<squintUntil?0.65:1)-squint)*k;
- const wx=asleep?0:Math.max(-1,Math.min(1,tx+gx)),wy=asleep?0:Math.max(-1,Math.min(1,ty+gy));
- const sk=gazeUntil>now?0.35:0.15; // bakış sıçramaları hızlı
- lx+=(wx-lx)*sk;ly+=(wy-ly)*sk;
- const breathe=Math.sin(now/(asleep?1400:900))*(asleep?1.2:0.6);
+ if(now>nextBlink&&!NOBLINK[mood]&&!pending)startBlink(now,Math.random()<0.18);
+ const b=blinkAmt(now);
+ if(pending&&now-blinkT>=75){mood=pending;pending=null;pop=1;sync()}
+ pop*=Math.pow(0.85,dt);
+ const open=NOBLINK[mood]&&!pending?1:1-b;
  // --- çiz ---
- x.fillStyle='#000';x.fillRect(0,0,W,H);x.fillStyle='#fff';x.strokeStyle='#fff';
- const ox=lx*10,oy=ly*6+breathe;
- eye(40+ox,27+oy,-1,blink,now);eye(88+ox,27+oy,1,blink,now);
- if(P[mood].blush){blushAt(40+ox-6,46+oy);blushAt(88+ox+6,46+oy)}
- mouth(64+ox*0.7,51+oy*0.8,now);
- if(P[mood].zz&&!pending){const t=(now/1600)%1;x.font='bold 8px monospace';x.globalAlpha=1;
-  x.fillText('z',96,22-t*6);if(t>0.3)x.fillText('Z',104,14-t*6)}
+ x.setTransform(1,0,0,1,0,0);x.fillStyle='#000';x.fillRect(0,0,W,H);x.fillStyle='#fff';x.strokeStyle='#fff';
+ const breathe=Math.sin(now/(asleep?1500:1000))*(asleep?1.4:0.5);
+ const ox=gaze.x*12,oy=gaze.y*7+breathe,sc=1+pop*0.12;
+ for(const s of[-1,1]){
+  const persp=1+gaze.x*s*0.08;
+  x.save();x.translate(64+s*24+ox,28+oy);x.scale(sc*persp,sc*persp*Math.max(0.1,open));
+  EYE[mood](s,now,gaze.x*1.2,gaze.y*1.2);x.restore();
+ }
+ if(BLUSH[mood]){blush(64-34+ox,42+oy);blush(64+34+ox,42+oy)}
+ x.save();x.translate(64+ox*0.75,50+oy*0.85);x.scale(sc,sc);MOUTH[mood](now);x.restore();
+ if(asleep){const t=(now/1800)%1;x.font='bold 8px monospace';x.fillText('z',94,20-t*5);if(t>0.35)x.fillText('Z',101,12-t*5)}
  present();
  requestAnimationFrame(frame);
 }
 requestAnimationFrame(frame);
+
+// ================= SENSÖRLER =================
 const info=document.getElementById('info');
-let nOri=0,nMot=0,oriOk=false;
-function setTilt(g,bt){
- tx=Math.max(-1,Math.min(1,g/35));
- ty=Math.max(-1,Math.min(1,(bt-40)/35));
- faceDown=Math.abs(bt)>150;
- if(faceDown)lastActive=performance.now();
+let nOri=0,nMot=0,base=null,rawG=0,rawB=0,faceDown=false,downSince=0;
+let grav={x:0,y:0,z:9.8},shakePeaks=[],lastPeakSign=0,spinMs=0,lastMot=0,rotMag=0,linMag=0;
+function wake(now){lastActive=now;if(idle){idle=false;trigger('surprise',900)}}
+function applyTilt(g,bt){
+ rawG=g;rawB=bt;if(!base)base={g,b:bt};
+ let nx=clamp((g-base.g)/28,-1,1),ny=clamp((bt-base.b)/28,-1,1);
+ const dz=v=>Math.abs(v)<0.08?0:(v-Math.sign(v)*0.08)/0.92;   // ölü bölge: titremeyi keser
+ nx=dz(nx);ny=dz(ny);
+ const ch=Math.abs(nx-tiltX)+Math.abs(ny-tiltY);moving=Math.min(1,moving+ch*3);
+ tiltX+=(nx-tiltX)*0.25;tiltY+=(ny-tiltY)*0.25;               // alçak geçiren filtre
 }
-function onOri(e){
- nOri++;if(e.beta==null&&e.gamma==null)return;oriOk=true;
- const g=e.gamma||0,bt=e.beta||0;               // sol/sağ, ileri/geri
- setTilt(g,bt);
- info.textContent=`olay: yön ${nOri} / hareket ${nMot}\nalpha ${(e.alpha||0).toFixed(0)}°  beta ${bt.toFixed(0)}°  gamma ${g.toFixed(0)}°\nsarsıntı ${shake.toFixed(1)}  dönüş ${rot.toFixed(0)}  mod: ${mood}`;
-}
+document.getElementById('center').onclick=()=>{base={g:rawG,b:rawB}};
+function onOri(e){nOri++;if(e.beta==null)return;applyTilt(e.gamma||0,e.beta||0)}
 function onMot(e){
- nMot++;const a=e.accelerationIncludingGravity;if(!a||a.x==null)return;
- if(!oriOk){ // yön sensörü veri vermiyorsa yerçekiminden eğimi hesapla
-  const g=Math.atan2(-a.x,Math.hypot(a.y,a.z))*180/Math.PI;
-  const bt=Math.atan2(a.y,a.z)*180/Math.PI;
-  setTilt(g,bt);
-  info.textContent=`olay: yön ${nOri} / hareket ${nMot} (ivmeölçer modu)\nbeta ${bt.toFixed(0)}°  gamma ${g.toFixed(0)}°\nsarsıntı ${shake.toFixed(1)}  dönüş ${rot.toFixed(0)}  mod: ${mood}`;
- }
- if(lastAcc){const d=Math.abs(a.x-lastAcc.x)+Math.abs(a.y-lastAcc.y)+Math.abs(a.z-lastAcc.z);
-  shake=shake*0.9+d*0.1;
-  const r=e.rotationRate;if(r)rot=rot*0.9+(Math.abs(r.alpha||0)+Math.abs(r.beta||0)+Math.abs(r.gamma||0))*0.1;
-  if(d>1.5||rot>60){const now=performance.now();lastActive=now;
-   if(idle){idle=false;trigger('surprise',900)}}
-  if(rot>250)trigger('dizzy',3000);          // döndürme
-  else if(shake>6)trigger('angry',2500);     // sallama
-  else if(d>12&&shake<3)trigger('surprise',1200); // hafif vuruş
- }
- lastAcc={x:a.x,y:a.y,z:a.z};
+ nMot++;const now=performance.now(),a=e.accelerationIncludingGravity;if(!a||a.x==null)return;
+ const dtm=lastMot?Math.min(100,now-lastMot):16;lastMot=now;
+ // yerçekimi tahmini (alçak geçiren) ve doğrusal ivme
+ grav.x+=(a.x-grav.x)*0.1;grav.y+=(a.y-grav.y)*0.1;grav.z+=(a.z-grav.z)*0.1;
+ const la=e.acceleration&&e.acceleration.x!=null?e.acceleration:{x:a.x-grav.x,y:a.y-grav.y,z:a.z-grav.z};
+ linMag=Math.hypot(la.x,la.y,la.z);
+ const r=e.rotationRate;rotMag=r?Math.hypot(r.alpha||0,r.beta||0,r.gamma||0):0;
+ if(!nOri||!base&&nOri===0){const g=Math.atan2(-grav.x,Math.hypot(grav.y,grav.z))*180/PI,bt=Math.atan2(grav.y,grav.z)*180/PI;if(!nOri)applyTilt(g,bt)}
+ if(linMag>1.2||rotMag>45)wake(now);
+ // ters çevirme: ekran 0,6 sn boyunca aşağı bakıyor
+ if(grav.z<-7){if(!downSince)downSince=now;faceDown=now-downSince>600}else{downSince=0;faceDown=false}
+ // döndürme: 350 ms boyunca hızlı dönüş
+ spinMs=rotMag>220?spinMs+dtm:Math.max(0,spinMs-dtm*2);
+ if(spinMs>350){trigger('dizzy',3000);spinMs=0}
+ // sallama: 1 sn içinde yön değiştiren 4+ güçlü tepe
+ const ax=Math.abs(la.x)>Math.abs(la.y)?la.x:la.y;
+ shakePeaks=shakePeaks.filter(t=>now-t<1000);
+ if(Math.abs(ax)>9&&Math.sign(ax)!==lastPeakSign){lastPeakSign=Math.sign(ax);shakePeaks.push(now)}
+ if(shakePeaks.length>=4){trigger('angry',2500);shakePeaks=[];tapAt=0}
+ // vuruş: kısa ani darbe, ardından sallama yok
+ if(linMag>7&&!tapAt&&rotMag<150&&shakePeaks.length<=1)tapAt=now;
+ // darbe gözleri hafifçe sarsar
+ if(linMag>4){gaze.vx-=la.x*0.006;gaze.vy+=la.y*0.006}
+ info.textContent=`olay: yön ${nOri} / hareket ${nMot}\neğim x ${tiltX.toFixed(2)}  y ${tiltY.toFixed(2)}\nivme ${linMag.toFixed(1)} m/s²  dönüş ${rotMag.toFixed(0)}°/s  sallama ${shakePeaks.length}\nmod: ${mood}${faceDown?'  (ters)':''}`;
 }
 document.getElementById('gyro').onclick=async function(){
  try{
@@ -201,15 +196,14 @@ document.getElementById('gyro').onclick=async function(){
    if(DeviceMotionEvent.requestPermission)await DeviceMotionEvent.requestPermission();
   }
   addEventListener('deviceorientation',onOri);addEventListener('devicemotion',onMot);
-  this.textContent='Gyro aktif ✓';this.classList.add('on');
-  if(!window.isSecureContext)info.textContent='Uyarı: sayfa HTTPS değil, sensörler kapalı olabilir.';
-  setTimeout(()=>{if(!nOri&&!nMot)info.textContent='Sensör verisi gelmiyor. Chrome: adres çubuğundaki kilit/ayar simgesi → Site ayarları → Hareket sensörleri → İzin ver, sonra sayfayı yenile.'},2000);
- }catch(err){info.textContent='Gyro açılamadı: '+err+' (HTTPS gerekli)'}
+  base=null;this.textContent='Gyro aktif ✓ (tuttuğun açı = merkez)';this.classList.add('on');
+  setTimeout(()=>{if(!nOri&&!nMot)info.textContent='Sensör verisi gelmiyor. Chrome: kilit simgesi → Site ayarları → Hareket sensörleri → İzin ver, sonra yenile.'},2000);
+ }catch(err){info.textContent='Gyro açılamadı: '+err}
 };
 // sürükleyerek simülasyon
 c.addEventListener('pointermove',e=>{if(!e.buttons&&e.pointerType==='mouse')return;const r=c.getBoundingClientRect();
- tx=((e.clientX-r.left)/r.width)*2-1;ty=((e.clientY-r.top)/r.height)*2-1});
-c.addEventListener('pointerup',()=>{tx=ty=0});
+ tiltX=((e.clientX-r.left)/r.width)*2-1;tiltY=((e.clientY-r.top)/r.height)*2-1;moving=1;lastActive=performance.now()});
+c.addEventListener('pointerup',()=>{tiltX=tiltY=0});
 </script>
 </body>
 </html>
