@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no">
+<title>Göz Animasyon Testi</title>
+<style>
+:root{--bg:#0d0f14;--panel:#171a22;--fg:#e8ecf4;--mute:#8a93a6;--acc:#7fb4ff}
+@media (prefers-color-scheme: light){:root:not([data-theme="dark"]){--bg:#0d0f14}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.4 system-ui,sans-serif;padding:16px;max-width:520px;margin:auto}
+h1{font-size:18px;margin:0 0 12px}
+.dev{background:#22252c;border-radius:22px;padding:18px;box-shadow:inset 0 0 0 2px #333842}
+canvas{width:100%;aspect-ratio:128/68;background:#000;border-radius:8px;image-rendering:pixelated;display:block}
+.row{display:flex;flex-wrap:wrap;gap:8px;margin-top:14px}
+button{flex:1 1 30%;padding:12px 6px;border:0;border-radius:10px;background:var(--panel);color:var(--fg);font-size:14px}
+button.on{background:var(--acc);color:#000}
+#gyro{flex-basis:100%;background:#2b4a7a}
+.info{margin-top:12px;font:12px monospace;color:var(--mute);white-space:pre-wrap}
+label{display:flex;gap:8px;align-items:center;margin-top:10px;color:var(--mute);font-size:13px}
+</style>
+</head>
+<body>
+<h1>Göz Animasyon Testi · 128×68</h1>
+<div class="dev"><canvas id="c" width="128" height="68"></canvas></div>
+<div class="row"><button id="gyro">Gyro'yu Etkinleştir</button></div>
+<div class="row" id="moods"></div>
+<label><input type="checkbox" id="auto" checked> Hareketle otomatik ifade (sallama → sersem, ters çevirme → uyku, hızlı eğim → şaşkın)</label>
+<div class="info" id="info">Gyro kapalı — ekranı sürükleyerek eğimi simüle edebilirsin.</div>
+<script>
+const c=document.getElementById('c'),x=c.getContext('2d');
+const W=128,H=68;
+const MOODS={normal:'Normal',happy:'Mutlu ^_^',wink:'Göz kırp',sleep:'Uyku',angry:'Kızgın',surprise:'Şaşkın',dizzy:'Sersem',love:'Aşık'};
+let mood='normal',manual='normal',moodUntil=0;
+let tx=0,ty=0,lx=0,ly=0;            // hedef / yumuşatılmış bakış (-1..1)
+let blinkT=0,nextBlink=performance.now()+2000;
+let shake=0,lastAcc=null,faceDown=false,t0=performance.now();
+
+const mb=document.getElementById('moods');
+for(const k in MOODS){const b=document.createElement('button');b.textContent=MOODS[k];b.dataset.k=k;
+ b.onclick=()=>{manual=k;mood=k;moodUntil=0;sync()};mb.appendChild(b)}
+function sync(){[...mb.children].forEach(b=>b.classList.toggle('on',b.dataset.k===mood))}
+sync();
+
+// ---- piksel çizim yardımcıları ----
+const px=(a,b)=>x.fillRect(Math.round(a),Math.round(b),1,1);
+function rect(a,b,w,h){x.fillRect(Math.round(a),Math.round(b),Math.round(w),Math.round(h))}
+function ellipse(cx,cy,rx,ry,fill=true){
+ for(let j=-ry;j<=ry;j++)for(let i=-rx;i<=rx;i++){const d=(i*i)/(rx*rx)+(j*j)/(ry*ry);
+  if(fill?d<=1:(d<=1&&d>=0.55))px(cx+i,cy+j)}}
+function arc(cx,cy,r,up,th=2){ // ^ veya ‿
+ for(let i=-r;i<=r;i++){const yy=Math.sqrt(r*r-i*i)*0.6;for(let k=0;k<th;k++)px(cx+i,cy+(up?-yy:yy)+k)}}
+function blush(cx,cy){for(let k=0;k<3;k++){px(cx+k*3,cy+1);px(cx+k*3+1,cy)}}
+function heart(cx,cy){const p=["01100110","11111111","11111111","01111110","00111100","00011000"];
+ p.forEach((r,j)=>[...r].forEach((v,i)=>v==='1'&&rect(cx-8+i*2,cy-6+j*2,2,2)))}
+
+function eye(cx,cy,side,open,now){
+ const ox=lx*7,oy=ly*5;cx+=ox;cy+=oy;
+ switch(mood){
+  case 'happy':arc(cx,cy+2,9,true,3);blush(cx-8+side*6,cy+9);return;
+  case 'sleep':arc(cx,cy,8,false,2);return;
+  case 'love':heart(cx,cy+2);return;
+  case 'dizzy':{const a=now/120*side;for(let r=2;r<10;r+=0.5){const t=r*1.3+a;px(cx+Math.cos(t)*r,cy+Math.sin(t)*r)}return}
+  case 'wink':if(side>0){x.fillRect(cx-8,cy-2,16,2);px(cx-6,cy-4);px(cx-4,cy-3);px(cx+5,cy+1);px(cx+3,cy);
+   rect(cx-8,cy-6,2,2);rect(cx+6,cy-6,2,2);/* < */ x.clearRect(0,0,0,0);return}break;
+ }
+ const rx=mood==='surprise'?11:9, ry=Math.max(1,Math.round((mood==='surprise'?12:10)*open));
+ ellipse(cx,cy,rx,ry);
+ if(mood==='angry'){x.fillStyle='#000';for(let i=-12;i<=12;i++){const yy=cy-ry-2+(i*side+12)*0.55;rect(cx+i,yy-6,1,8)}x.fillStyle='#dff0ff'}
+ if(ry>3){x.fillStyle='#000';rect(cx+lx*3+3,cy+ly*3-4,3,3);x.fillStyle='#dff0ff'} // parlama
+}
+function mouth(now){
+ const cx=64+lx*5,cy=50+ly*4;
+ switch(mood){
+  case 'happy':case 'love':arc(cx,cy-2,6,false,2);break;
+  case 'wink':rect(cx-5,cy-2,10,2);rect(cx-4,cy,8,3);x.fillStyle='#000';rect(cx-2,cy,4,1);x.fillStyle='#dff0ff';break;
+  case 'sleep':rect(cx-2,cy+2,4,2);{const z=Math.floor(now/500)%3;x.font='8px monospace';x.fillText('z'.repeat(z+1).split('').map((v,i)=>i%2?'Z':v).join(''),82,16)}break;
+  case 'angry':rect(cx-3,cy+2,6,2);break;
+  case 'surprise':ellipse(cx,cy+1,3,4,false);break;
+  case 'dizzy':for(let i=-6;i<=6;i++)px(cx+i,cy+Math.sin(i+now/100)*1.5);break;
+  default:rect(cx-3,cy+2,6,1);
+ }
+}
+
+function draw(now){
+ // otomatik ifade süresi
+ if(moodUntil&&now>moodUntil){moodUntil=0;mood=manual;sync()}
+ if(document.getElementById('auto').checked){
+  if(faceDown&&mood!=='sleep'){mood='sleep';moodUntil=now+500;sync()}
+  else if(faceDown)moodUntil=now+500;
+ }
+ // göz kırpma
+ if(now>nextBlink){blinkT=now;nextBlink=now+2000+Math.random()*3500}
+ const b=(now-blinkT)/150;const open=b<1?1-b:b<2?b-1:1;
+ lx+=(tx-lx)*0.15;ly+=(ty-ly)*0.15;
+ const bob=Math.sin((now-t0)/700)*0.6;
+ x.fillStyle='#000';x.fillRect(0,0,W,H);x.fillStyle='#dff0ff';
+ x.save();x.translate(0,bob);
+ eye(38,28,-1,open,now);eye(90,28,1,open,now);mouth(now);
+ x.restore();
+ requestAnimationFrame(draw);
+}
+requestAnimationFrame(draw);
+
+function trigger(m,ms){if(!document.getElementById('auto').checked||moodUntil&&mood===m)return;mood=m;moodUntil=performance.now()+ms;sync()}
+const info=document.getElementById('info');
+function onOri(e){
+ const g=e.gamma||0,bt=e.beta||0;               // sol/sağ, ileri/geri
+ tx=Math.max(-1,Math.min(1,g/35));
+ ty=Math.max(-1,Math.min(1,(bt-40)/35));
+ faceDown=Math.abs(bt)>150;
+ info.textContent=`alpha ${(e.alpha||0).toFixed(0)}°  beta ${bt.toFixed(0)}°  gamma ${g.toFixed(0)}°\nsarsıntı ${shake.toFixed(1)}  mod: ${mood}`;
+}
+function onMot(e){
+ const a=e.accelerationIncludingGravity;if(!a)return;
+ if(lastAcc){const d=Math.abs(a.x-lastAcc.x)+Math.abs(a.y-lastAcc.y)+Math.abs(a.z-lastAcc.z);
+  shake=shake*0.9+d*0.1;
+  if(shake>6)trigger('dizzy',2500);else if(d>18)trigger('surprise',1200);}
+ lastAcc={x:a.x,y:a.y,z:a.z};
+}
+document.getElementById('gyro').onclick=async function(){
+ try{
+  if(typeof DeviceOrientationEvent!=='undefined'&&DeviceOrientationEvent.requestPermission){
+   if(await DeviceOrientationEvent.requestPermission()!=='granted')throw 'izin reddedildi';
+   if(DeviceMotionEvent.requestPermission)await DeviceMotionEvent.requestPermission();
+  }
+  addEventListener('deviceorientation',onOri);addEventListener('devicemotion',onMot);
+  this.textContent='Gyro aktif ✓';this.classList.add('on');
+ }catch(err){info.textContent='Gyro açılamadı: '+err+' (HTTPS gerekli)'}
+};
+// sürükleyerek simülasyon
+c.addEventListener('pointermove',e=>{if(!e.buttons&&e.pointerType==='mouse')return;const r=c.getBoundingClientRect();
+ tx=((e.clientX-r.left)/r.width)*2-1;ty=((e.clientY-r.top)/r.height)*2-1});
+c.addEventListener('pointerup',()=>{tx=ty=0});
+</script>
+</body>
+</html>
